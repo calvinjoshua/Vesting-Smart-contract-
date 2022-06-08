@@ -88,7 +88,7 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         beforeClose
         onlyOwner
     {
-        _token.safeTransferFrom(beneficiary, address(this), amount);
+        _token.safeTransferFrom(owner(), address(this), amount);
 
         vestings.push(
             VestingDetails(
