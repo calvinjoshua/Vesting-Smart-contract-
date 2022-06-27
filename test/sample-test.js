@@ -55,13 +55,13 @@ describe("Vesting Contract", function () {
     await main.release(addr1.address,0);
 
     balanceofManagerAfter = await diam.balanceOf(main.address)
-    //console.log("balanceofManagerAfter", balanceofManagerAfter) //45000000000000000000000
+    //console.log("balanceofManagerAfter", balanceofManagerAfter) 
 
     balanceofBenAfter = await diam.balanceOf(addr1.address)
     //console.log("balanceofBenAfter", balanceofBenAfter)
-    expect(balanceofManagerAfter.toString()).to.equal("45000000000000000000000")  // 1500
+    expect(balanceofManagerAfter.toString()).to.equal("45000000000000000000000") 
 
-    expect(balanceofBenAfter.toString()).to.equal("55000000000000000000000")  //5000000000000000000000
+    expect(balanceofBenAfter.toString()).to.equal("55000000000000000000000")  
 
 
     await ethers.provider.send('evm_increaseTime', [twoMonths]);
