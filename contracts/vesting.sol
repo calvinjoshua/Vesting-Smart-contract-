@@ -1,50 +1,37 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.10;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
-    IERC20Upgradeable public _token; 
+    IERC20Upgradeable public _token;
 
     bool internal _end;
-
-    uint256 internal lock_duration; 
+    
+    uint256 internal lock_duration;
 
     uint256[12] internal rate;
 
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
+    ///@dev no constructor in upgradable contracts. Instead we have initializers
+    ///@param token address of diam
     function initialize(IERC20Upgradeable token) public initializer {
         ///@dev as there is no constructor, we need to initialise the OwnableUpgradeable explicitly
         __Ownable_init();
-        __Context_init_unchained();
-        __UUPSUpgradeable_init();
+        // __UUPSUpgradeable_init();
         _token = token;
-        _end = false;
-        lock_duration = 31556916;
-        rate = [uint256(10), 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15];
+        lock_duration = 31556916; //number of seconds for 12 months
+        rate = [uint256(10), 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15]; //release rate starting form first month to last month(12)
     }
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    //constructor() initializer {}
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
-
-    /**
-     * @dev Throws if vesting not started
-     */
-    modifier afterClose() {
-        require(_end == true, "not Closed");
-        _;
-    }
-
-    /**
-     * @dev Throws if vesting ended
-     */
-    modifier beforeClose() {
-        require(_end == false, "Closed");
-        _;
-    }
 
     struct VestingDetails {
         uint256 id;
@@ -52,7 +39,7 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         uint256 amount;
         uint256 start_time;
         uint256 release_time;
-       // uint256 recent_claim_at;
+        // uint256 recent_claim_at;
         bool status;
         uint256 pastInterval;
         uint256[12] vestingIntervals;
@@ -65,7 +52,7 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         uint256 unlockedAmount;
     }
 
-    VestingDetails[] public vestings; //0//1
+    VestingDetails[] public vestings;
 
     mapping(address => BeneficiaryDetails) public beneficiary_details;
 
@@ -73,31 +60,26 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     event released(address indexed to, uint256 claim_id, uint256 amount);
 
-    function end() external onlyOwner {
-        require(_end == false, "Already Done");
-        _end = true;
-    }
-
-    function start() external onlyOwner {
-        require(_end == true, "Already Done");
-        _end = false;
-    }
-
     function setBeneficiary(address beneficiary, uint256 amount)
         external
-        beforeClose
         onlyOwner
     {
+        uint32 size;
+        assembly {
+            size := extcodesize(beneficiary)
+        }
+        require(size == 0, "SUPPORTS ONLY EOA ACCOUNTS");
+        require(beneficiary_details[beneficiary].count == 0, "EXIST!");
         _token.safeTransferFrom(owner(), address(this), amount);
 
         vestings.push(
             VestingDetails(
-                vestings.length, //0
-                beneficiary, //
+                vestings.length,
+                beneficiary,
                 amount,
                 block.timestamp,
                 block.timestamp + lock_duration,
-               // 0,
+                // 0,
                 true,
                 0,
                 [
@@ -118,27 +100,22 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         );
         beneficiary_details[beneficiary].lockedAmount = amount;
         beneficiary_details[beneficiary].id = vestings.length - 1;
+        beneficiary_details[beneficiary].count = 1;
         emit BeneficiarySet(beneficiary, vestings.length - 1, amount);
     }
 
-    function release(
-        address beneficiary,
-        uint256 id //,
-    ) external afterClose onlyOwner returns (bool) {
+    function release(uint256 id) external onlyOwner returns (bool) {
+        require(id < vestings.length, "Invalid id");
         VestingDetails storage vesting_details = vestings[id];
-        require(
-            vesting_details.beneficiary == beneficiary,
-            "Invalid Beneficiary"
-        );
         require(
             vesting_details.status == true,
             "All the tokens are released to the wallet"
         );
-        // require(
-        //     block.timestamp >= vesting_details.pastInterval,
-        //     "over"
-        // );
-        uint256 ratei = 0;
+        require(
+            block.timestamp >= vesting_details.vestingIntervals[0],
+            "Vesting Interval not started"
+        );
+        uint256 _rate = 0;
         bool done;
         for (uint256 i = 0; i < 12; i++) {
             if (block.timestamp >= vesting_details.vestingIntervals[i]) {
@@ -147,7 +124,7 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
                     vesting_details.vestingIntervals[i] ==
                     false
                 ) {
-                    ratei += rate[i];
+                    _rate += rate[i];
                 }
             } else {
                 vesting_details.pastInterval = vesting_details.vestingIntervals[
@@ -156,11 +133,17 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
                 break;
             }
         }
-        uint256 claimed_amount = (vesting_details.amount * ratei) / 100;
+        uint256 claimed_amount = (vesting_details.amount * _rate) / 100;
         if (block.timestamp >= vesting_details.vestingIntervals[11]) {
             done = true;
         }
-        return _releaseWithAmount(id, beneficiary, claimed_amount, done);
+        return
+            _releaseWithAmount(
+                id,
+                vesting_details.beneficiary,
+                claimed_amount,
+                done
+            );
     }
 
     function _releaseWithAmount(
@@ -172,10 +155,8 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         if (claimed_amount > 0) {
             if (_d == true) {
                 vestings[id].status = false;
-                //vestings[id].released = true;
+                beneficiary_details[ben].count = 0;
             }
-            // vestings[id].recent_claim_at = block.timestamp;
-            // vestings[id].nextPeriod = cm + 1;
             _token.safeTransfer(ben, claimed_amount);
             beneficiary_details[ben].lockedAmount -= claimed_amount;
             beneficiary_details[ben].unlockedAmount += claimed_amount;
