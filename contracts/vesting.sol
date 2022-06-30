@@ -11,7 +11,7 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     IERC20Upgradeable public _token;
 
     bool internal _end;
-    
+
     uint256 internal lock_duration;
 
     uint256[12] internal rate;
@@ -25,11 +25,9 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         __Ownable_init();
         // __UUPSUpgradeable_init();
         _token = token;
-        lock_duration = 31556916; //number of seconds for 12 months
-        rate = [uint256(10), 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15]; //release rate starting form first month to last month(12)
+        lock_duration = 31556916;
+        rate = [uint256(10), 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15];
     }
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    //constructor() initializer {}
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
@@ -68,14 +66,14 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         assembly {
             size := extcodesize(beneficiary)
         }
-        require(size == 0, "SUPPORTS ONLY EOA ACCOUNTS");
+        require(size == 0, "SUPPORTS ONLY EOA ADDRESS");
         require(beneficiary_details[beneficiary].count == 0, "EXIST!");
         _token.safeTransferFrom(owner(), address(this), amount);
 
         vestings.push(
             VestingDetails(
-                vestings.length,
-                beneficiary,
+                vestings.length, //0
+                beneficiary, //
                 amount,
                 block.timestamp,
                 block.timestamp + lock_duration,
@@ -104,7 +102,7 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         emit BeneficiarySet(beneficiary, vestings.length - 1, amount);
     }
 
-    function release(uint256 id) external onlyOwner returns (bool) {
+    function release(uint256 id) external authorized(id) returns (bool) {
         require(id < vestings.length, "Invalid id");
         VestingDetails storage vesting_details = vestings[id];
         require(
@@ -164,5 +162,14 @@ contract Vesting is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             return true;
         }
         return false;
+    }
+
+    modifier authorized(uint256 _id) {
+        require(
+            _msgSender() == owner() ||
+                _msgSender() == vestings[_id].beneficiary,
+            "caller is not the owner or Actual beneficiary"
+        );
+        _;
     }
 }
